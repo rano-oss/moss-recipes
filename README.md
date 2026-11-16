@@ -1,8 +1,9 @@
 # moss-recipes (IME dogfood)
 
-Private-priority moss packages for the COSMIC xx-im / IME stack.
-GitHub Actions builds `.stone` packages and publishes an indexed repo to
-GitHub Pages.
+Priority-100 moss packages for the COSMIC xx-im / IME stack.
+GitHub Actions (ubuntu-latest + boulder from os-tools) builds `.stone`
+packages and publishes an indexed repo to GitHub Pages (repo is public so
+Pages works on the free plan).
 
 ## Install on another AerynOS machine
 
