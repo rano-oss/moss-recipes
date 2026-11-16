@@ -1,0 +1,57 @@
+#!/bin/bash
+# Rebuild CosmicComp input_method_map from per-IME fragments.
+# Fragments: /usr/share/cosmic/com.system76.CosmicComp/v1/input_method_map.d/<layout>.ron
+# Each fragment is a single InputMethodEntry RON value.
+set -euo pipefail
+
+BASE="${COSMIC_COMP_V1:-/usr/share/cosmic/com.system76.CosmicComp/v1}"
+FRAG_DIR="${BASE}/input_method_map.d"
+OUT="${BASE}/input_method_map"
+
+entry_body() {
+    # Collapse fragment to a single line
+    tr -d '\r' <"$1" | sed '/^$/d' | tr '\n' ' ' | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//'
+}
+
+merge_to() {
+    local dest="$1"
+    mkdir -p "$(dirname "$dest")"
+
+    {
+        echo '{'
+        local first=1
+        local f key body
+        if [ -d "$FRAG_DIR" ]; then
+            while IFS= read -r f; do
+                [ -n "$f" ] || continue
+                key="$(basename "$f" .ron)"
+                body="$(entry_body "$f")"
+                if [ "$first" -eq 0 ]; then
+                    echo ','
+                fi
+                first=0
+                printf '    "%s": %s\n' "$key" "$body"
+            done < <(find "$FRAG_DIR" -maxdepth 1 -type f -name '*.ron' | sort)
+        fi
+        echo '}'
+    } >"${dest}.tmp"
+    mv -f "${dest}.tmp" "$dest"
+}
+
+mkdir -p "$(dirname "$OUT")"
+merge_to "$OUT"
+
+# Update existing user CosmicComp configs (create map if that dir already exists)
+for home in /home/* /root; do
+    [ -d "$home" ] || continue
+    user_v1="${home}/.config/cosmic/com.system76.CosmicComp/v1"
+    if [ -d "$user_v1" ]; then
+        merge_to "${user_v1}/input_method_map"
+        if [ "$(basename "$home")" != "root" ]; then
+            user="$(basename "$home")"
+            chown "${user}:${user}" "${user_v1}/input_method_map" 2>/dev/null || true
+        fi
+    fi
+done
+
+exit 0

@@ -2,11 +2,17 @@ name: Build IME stones
 
 on:
   workflow_dispatch:
+    inputs:
+      recipes:
+        description: "Space-separated recipes to rebuild (empty = auto from changed paths)"
+        required: false
+        default: ""
   push:
     branches: [main]
     paths:
       - "**/stone.yaml"
       - "**/*.tar.xz"
+      - "**/files/**"
       - justfile
       - .github/workflows/build.yml
 
@@ -21,10 +27,72 @@ concurrency:
 
 env:
   CARGO_TERM_COLOR: always
+  ALL_RECIPES: pinyinwl-data libchewing-data pinyinwl chewingwl cosmic-comp cosmic-applets cosmic-session
+  PAGES_BASE: https://rano-oss.github.io/moss-recipes/x86_64
 
 jobs:
-  # Build moss/boulder once; matrix jobs reuse the binaries (avoids 7× cargo).
+  select:
+    runs-on: ubuntu-latest
+    outputs:
+      recipes: ${{ steps.pick.outputs.recipes }}
+      build: ${{ steps.pick.outputs.build }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Decide which recipes to rebuild
+        id: pick
+        shell: bash
+        run: |
+          set -euo pipefail
+          manual="${{ github.event.inputs.recipes }}"
+          if [ -n "${manual}" ]; then
+            recipes="${manual}"
+          elif [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            # Manual run with empty input → rebuild nothing unless forced; default to changed
+            recipes=""
+          else
+            recipes=""
+          fi
+
+          if [ -z "${recipes}" ]; then
+            before="${{ github.event.before }}"
+            if [ -z "${before}" ] || [ "${before}" = "0000000000000000000000000000000000000000" ]; then
+              before="$(git rev-parse HEAD~1 2>/dev/null || true)"
+            fi
+            if [ -n "${before}" ] && git cat-file -e "${before}^{commit}" 2>/dev/null; then
+              changed="$(git diff --name-only "${before}" "${{ github.sha }}")"
+            else
+              changed="$(git show --name-only --pretty='' HEAD)"
+            fi
+            echo "Changed files:"
+            echo "${changed}"
+
+            # Workflow / justfile changes alone do not rebuild packages
+            recipes=""
+            for r in ${ALL_RECIPES}; do
+              if echo "${changed}" | grep -qE "^${r}/"; then
+                recipes="${recipes} ${r}"
+              fi
+            done
+            recipes="$(echo ${recipes})"
+          fi
+
+          if [ -z "${recipes}" ]; then
+            echo "No recipe rebuilds needed (publish will refresh index from Pages)."
+            echo "build=false" >> "$GITHUB_OUTPUT"
+            echo "recipes=[]" >> "$GITHUB_OUTPUT"
+          else
+            echo "Rebuilding:${recipes}"
+            json="$(printf '%s\n' ${recipes} | jq -R . | jq -sc .)"
+            echo "build=true" >> "$GITHUB_OUTPUT"
+            echo "recipes=${json}" >> "$GITHUB_OUTPUT"
+          fi
+
   tools:
+    needs: select
+    if: needs.select.outputs.build == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 60
     steps:
@@ -65,7 +133,6 @@ jobs:
           git clone --depth 1 https://github.com/AerynOS/os-tools.git "$HOME/os-tools"
           cd "$HOME/os-tools"
           just get-started
-          # Drop the compile tree — only the installed binaries/data are needed.
           rm -rf "$HOME/os-tools" "$HOME/.cargo/registry/src" || true
           df -h /
 
@@ -87,20 +154,14 @@ jobs:
           retention-days: 3
 
   build:
-    needs: tools
+    needs: [select, tools]
+    if: needs.select.outputs.build == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 240
     strategy:
       fail-fast: false
       matrix:
-        recipe:
-          - pinyinwl-data
-          - libchewing-data
-          - pinyinwl
-          - chewingwl
-          - cosmic-comp
-          - cosmic-applets
-          - cosmic-session
+        recipe: ${{ fromJson(needs.select.outputs.recipes) }}
     steps:
       - name: Free disk space
         uses: jlumbroso/free-disk-space@main
@@ -213,8 +274,6 @@ jobs:
 
           mkdir -p "${GITHUB_WORKSPACE}/out"
           mv -v "${stones[@]}" "${GITHUB_WORKSPACE}/out/"
-
-          # Free boulder build roots before artifact upload
           rm -rf "${HOME}/.cache/boulder" || true
           df -h /
 
@@ -227,45 +286,99 @@ jobs:
           retention-days: 3
 
   publish:
-    needs: build
+    needs: [select, build]
+    if: always() && (needs.select.outputs.build == 'false' || needs.build.result == 'success')
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - name: Free disk space
-        uses: jlumbroso/free-disk-space@main
-        with:
-          tool-cache: false
-          large-packages: false
-          docker-images: true
-          swap-storage: false
+      - name: Install moss (for index + pkg list)
+        run: |
+          set -euo pipefail
+          # Lightweight: reuse aos-tools artifact when we built; otherwise fetch moss only via os-tools is heavy.
+          # Prefer downloading published index via curl + a prebuilt moss from a prior tools artifact if present.
+          sudo apt-get update
+          sudo apt-get install -y curl ca-certificates jq
 
-      - name: Download tooling
+      - name: Download tooling if present
+        continue-on-error: true
         uses: actions/download-artifact@v4
         with:
           name: aos-tools
           path: /tmp/aos-tools
 
-      - name: Install moss
+      - name: Ensure moss binary
         run: |
           set -euo pipefail
-          mkdir -p /tmp/aos-unpack "$HOME/.local/bin"
-          tar -C /tmp/aos-unpack -xJf /tmp/aos-tools/aos-tools.tar.xz
-          install -m755 /tmp/aos-unpack/moss "$HOME/.local/bin/"
-          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          if [ -f /tmp/aos-tools/aos-tools.tar.xz ]; then
+            mkdir -p /tmp/aos-unpack "$HOME/.local/bin"
+            tar -C /tmp/aos-unpack -xJf /tmp/aos-tools/aos-tools.tar.xz
+            install -m755 /tmp/aos-unpack/moss "$HOME/.local/bin/"
+            echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          else
+            # No rebuild this run — install moss from os-tools quickly for indexing only
+            sudo apt-get install -y build-essential clang pkg-config git libarchive-tools
+            curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain 1.94
+            . "$HOME/.cargo/env"
+            cargo install just --locked
+            git clone --depth 1 https://github.com/AerynOS/os-tools.git "$HOME/os-tools"
+            cd "$HOME/os-tools"
+            just get-started
+            echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+            rm -rf "$HOME/os-tools"
+          fi
+          moss --version
 
-      - name: Download all stones
+      - name: Seed repo from live Pages
+        run: |
+          set -euo pipefail
+          mkdir -p repo/x86_64 /tmp/pages-root
+          moss -D /tmp/pages-root repo add pages "${PAGES_BASE}/stone.index" -p 100 -y
+          # List available packages and download their .stone files by conventional name
+          mapfile -t lines < <(moss -D /tmp/pages-root pkg list -a | sed -E 's/  +/ /g' | awk 'NF>=2 {print $1,$2}')
+          for line in "${lines[@]}"; do
+            name="${line%% *}"
+            verrel="${line##* }"
+            # verrel like 0.1.0-1005
+            for suffix in "" "-dbginfo"; do
+              pkgname="${name}"
+              # dbginfo packages are listed separately as name-dbginfo
+              true
+            done
+            file="${name}-${verrel}-1-x86_64.stone"
+            url="${PAGES_BASE}/${file}"
+            code="$(curl -sI -o /dev/null -w '%{http_code}' "$url")"
+            if [ "$code" = "200" ]; then
+              echo "fetch ${file}"
+              curl -fsSL "$url" -o "repo/x86_64/${file}"
+            else
+              echo "skip ${file} (HTTP ${code})"
+            fi
+          done
+          ls -lah repo/x86_64 || true
+
+      - name: Download newly built stones
+        if: needs.select.outputs.build == 'true'
         uses: actions/download-artifact@v4
         with:
           pattern: stone-*
-          path: stones-raw
+          path: stones-new
           merge-multiple: true
 
-      - name: Index moss repo
+      - name: Overlay new stones and reindex
         run: |
           set -euo pipefail
           mkdir -p repo/x86_64
-          # Artifacts may nest per-recipe dirs depending on merge-multiple
-          find stones-raw -type f -name '*.stone' -exec mv -v {} repo/x86_64/ \;
+          if [ -d stones-new ]; then
+            # Drop older builds of the same package name before adding new ones
+            while IFS= read -r -d '' stone; do
+              base="$(basename "$stone")"
+              # package name is everything before the version (last components: VER-REL-1-arch.stone)
+              pkg="$(echo "$base" | sed -E 's/-[0-9].*$//')"
+              echo "replacing ${pkg} with ${base}"
+              find repo/x86_64 -maxdepth 1 -type f -name "${pkg}-*.stone" -delete
+              mv -v "$stone" repo/x86_64/
+            done < <(find stones-new -type f -name '*.stone' -print0)
+          fi
           moss index -i repo/x86_64
           ls -lah repo/x86_64
 

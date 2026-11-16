@@ -3,7 +3,7 @@
 
 name        : pinyinwl
 version     : "0.1.0"
-release     : 1005
+release     : 1007
 homepage    : https://github.com/rano-oss/pinyinwl
 upstreams   :
     - git|https://github.com/rano-oss/pinyinwl.git :
@@ -12,6 +12,8 @@ summary     : Pinyin input method for Wayland / COSMIC
 description : |
     Pinyin IME for Wayland using libchinese/libpinyin and
     xx-input-method (branch experimental/xx-im-preedit-start).
+    Registers layout "cn" in CosmicComp input_method_map via a
+    fragment + moss sys trigger (removed again on uninstall).
 license     : MIT
 builddeps   :
     - pkgconfig(xkbcommon)
@@ -24,3 +26,6 @@ build       : |
     %cargo_build
 install     : |
     %cargo_install
+    install -Dm755 %(pkgdir)/files/cosmic-ime-merge-map %(installroot)/usr/bin/cosmic-ime-merge-map
+    install -Dm644 %(pkgdir)/files/cn.ron %(installroot)%(datadir)/cosmic/com.system76.CosmicComp/v1/input_method_map.d/cn.ron
+    install -Dm644 %(pkgdir)/files/cosmic-input-method-map.yaml %(installroot)%(datadir)/moss/triggers/sys.d/cosmic-input-method-map.yaml

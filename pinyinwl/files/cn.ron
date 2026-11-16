@@ -1,0 +1,5 @@
+(
+    app_id: "pinyinwl",
+    command: "/usr/bin/pinyinwl",
+    label: "拼",
+)

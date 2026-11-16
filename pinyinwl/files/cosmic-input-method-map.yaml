@@ -1,0 +1,17 @@
+name: cosmic_input_method_map
+description: |
+    Rebuild CosmicComp input_method_map from installed IME fragments
+    under /usr/share/cosmic/com.system76.CosmicComp/v1/input_method_map.d/.
+
+handlers:
+    rebuild:
+        run: "/usr/bin/cosmic-ime-merge-map"
+        args: []
+
+paths:
+    "/usr/share/cosmic/com.system76.CosmicComp/v1/input_method_map.d/*":
+        handlers:
+            - rebuild
+    "/usr/bin/cosmic-ime-merge-map":
+        handlers:
+            - rebuild
