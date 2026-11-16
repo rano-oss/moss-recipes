@@ -17,19 +17,24 @@ permissions:
 
 concurrency:
   group: pages
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 env:
   CARGO_TERM_COLOR: always
-  RECIPES: pinyinwl-data libchewing-data pinyinwl chewingwl cosmic-comp cosmic-applets cosmic-session
 
 jobs:
-  build:
+  # Build moss/boulder once; matrix jobs reuse the binaries (avoids 7× cargo).
+  tools:
     runs-on: ubuntu-latest
-    timeout-minutes: 360
+    timeout-minutes: 60
     steps:
-      - name: Checkout recipes
-        uses: actions/checkout@v4
+      - name: Free disk space
+        uses: jlumbroso/free-disk-space@main
+        with:
+          tool-cache: true
+          large-packages: true
+          docker-images: true
+          swap-storage: true
 
       - name: Install host packages
         run: |
@@ -46,47 +51,110 @@ jobs:
         with:
           toolchain: "1.94"
 
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: cargo-os-tools-${{ runner.os }}-1.94
+
+      - name: Build and install moss + boulder
+        run: |
+          set -euo pipefail
+          git clone --depth 1 https://github.com/AerynOS/os-tools.git "$HOME/os-tools"
+          cd "$HOME/os-tools"
+          just get-started
+          # Drop the compile tree — only the installed binaries/data are needed.
+          rm -rf "$HOME/os-tools" "$HOME/.cargo/registry/src" || true
+          df -h /
+
+      - name: Pack tooling
+        run: |
+          set -euo pipefail
+          mkdir -p "$HOME/aos-tools-pack"
+          cp -a "$HOME/.local/bin/boulder" "$HOME/.local/bin/moss" "$HOME/aos-tools-pack/"
+          cp -a "$HOME/.local/share/boulder" "$HOME/aos-tools-pack/share-boulder"
+          cp -a "$HOME/.config/boulder" "$HOME/aos-tools-pack/config-boulder"
+          tar -C "$HOME/aos-tools-pack" -cJf aos-tools.tar.xz .
+          ls -lh aos-tools.tar.xz
+
+      - name: Upload tooling artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: aos-tools
+          path: aos-tools.tar.xz
+          retention-days: 3
+
+  build:
+    needs: tools
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+    strategy:
+      fail-fast: false
+      matrix:
+        recipe:
+          - pinyinwl-data
+          - libchewing-data
+          - pinyinwl
+          - chewingwl
+          - cosmic-comp
+          - cosmic-applets
+          - cosmic-session
+    steps:
+      - name: Free disk space
+        uses: jlumbroso/free-disk-space@main
+        with:
+          tool-cache: true
+          large-packages: true
+          docker-images: true
+          swap-storage: true
+
+      - name: Checkout recipes
+        uses: actions/checkout@v4
+
+      - name: Install host packages
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libarchive-tools ca-certificates
+
       - name: Configure subuid/subgid
         run: |
           sudo touch /etc/subuid /etc/subgid
-          # Allow rootless boulder containers (idempotent-ish)
           if ! grep -q "^${USER}:" /etc/subuid; then
             sudo usermod --add-subuids 1065536-1131071 --add-subgids 1065536-1131071 "${USER}"
           fi
           if ! grep -q "^root:" /etc/subuid; then
             sudo usermod --add-subuids 1000000-1065535 --add-subgids 1000000-1065535 root
           fi
-          # Ubuntu 24.04+ often restricts unprivileged userns
           if [ -f /proc/sys/kernel/apparmor_restrict_unprivileged_userns ]; then
             echo 0 | sudo tee /proc/sys/kernel/apparmor_restrict_unprivileged_userns
           fi
 
-      - name: Cache cargo registry / os-tools build
-        uses: actions/cache@v4
+      - name: Download tooling
+        uses: actions/download-artifact@v4
         with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            ~/os-tools/target
-          key: os-tools-${{ runner.os }}-${{ hashFiles('.github/workflows/build.yml') }}
+          name: aos-tools
+          path: /tmp/aos-tools
 
-      - name: Build and install moss + boulder
+      - name: Install tooling
         run: |
           set -euo pipefail
-          if [ ! -d "$HOME/os-tools/.git" ]; then
-            git clone --depth 1 https://github.com/AerynOS/os-tools.git "$HOME/os-tools"
-          else
-            git -C "$HOME/os-tools" fetch --depth 1 origin main
-            git -C "$HOME/os-tools" reset --hard origin/main
-          fi
-          cd "$HOME/os-tools"
-          just get-started
+          mkdir -p /tmp/aos-unpack "$HOME/.local/bin" "$HOME/.local/share" "$HOME/.config"
+          tar -C /tmp/aos-unpack -xJf /tmp/aos-tools/aos-tools.tar.xz
+          install -m755 /tmp/aos-unpack/boulder /tmp/aos-unpack/moss "$HOME/.local/bin/"
+          rm -rf "$HOME/.local/share/boulder" "$HOME/.config/boulder"
+          cp -a /tmp/aos-unpack/share-boulder "$HOME/.local/share/boulder"
+          cp -a /tmp/aos-unpack/config-boulder "$HOME/.config/boulder"
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          boulder --version
+          moss --version
+          df -h /
 
-      - name: Configure boulder profile + local repo
+      - name: Configure boulder profile
         run: |
           set -euo pipefail
-          LOCAL_REPO="${GITHUB_WORKSPACE}/repo/x86_64"
+          LOCAL_REPO="${RUNNER_TEMP}/local_repo"
           mkdir -p "$LOCAL_REPO" "$HOME/.config/boulder/profile.d"
           moss index -i "$LOCAL_REPO"
 
@@ -94,7 +162,7 @@ jobs:
           ci-x86_64 {
             repositories {
               local {
-                description "CI publish tree"
+                description "CI scratch local repo"
                 uri "file://${LOCAL_REPO}/stone.index"
                 priority 100
                 active #true
@@ -111,49 +179,95 @@ jobs:
             }
           }
           EOF
-          # Strip leading indentation from the heredoc body
           sed -i 's/^          //' "$HOME/.config/boulder/profile.d/ci-x86_64.kdl"
+          echo "LOCAL_REPO=${LOCAL_REPO}" >> "$GITHUB_ENV"
 
-          {
-            echo "BOULDER_PROFILE=ci-x86_64"
-            echo "LOCAL_REPO=${LOCAL_REPO}"
-            echo "BOULDER_ARGS=--data-dir=${HOME}/.local/share/boulder --config-dir=${HOME}/.config/boulder --moss-root=${HOME}/.cache/boulder"
-            echo "BOULDER=${HOME}/.local/bin/boulder"
-          } >> "$GITHUB_ENV"
-
-      - name: Build all recipes
+      - name: Build ${{ matrix.recipe }}
         run: |
           set -euo pipefail
           export PATH="${HOME}/.local/bin:${PATH}"
           BOULDER_BIN="${HOME}/.local/bin/boulder"
           BOULDER_FLAGS=(--data-dir="${HOME}/.local/share/boulder" --config-dir="${HOME}/.config/boulder" --moss-root="${HOME}/.cache/boulder")
 
-          for name in ${RECIPES}; do
-            echo "::group::Building ${name}"
-            dir="${GITHUB_WORKSPACE}/${name}"
-            cd "$dir"
-            recipe=stone.yaml
-            cleanup=
-            if grep -q '__RECIPE_DIR__' stone.yaml; then
-              recipe="$(mktemp ./stone.XXXXXX.yaml)"
-              sed "s|__RECIPE_DIR__|${dir}|g" stone.yaml > "$recipe"
-              cleanup=$recipe
-            fi
-            "${BOULDER_BIN}" "${BOULDER_FLAGS[@]}" build -y -u -p ci-x86_64 "$recipe"
-            if [ -n "${cleanup}" ]; then rm -f "${cleanup}"; fi
+          name="${{ matrix.recipe }}"
+          dir="${GITHUB_WORKSPACE}/${name}"
+          cd "$dir"
+          recipe=stone.yaml
+          cleanup=
+          if grep -q '__RECIPE_DIR__' stone.yaml; then
+            recipe="$(mktemp ./stone.XXXXXX.yaml)"
+            sed "s|__RECIPE_DIR__|${dir}|g" stone.yaml > "$recipe"
+            cleanup=$recipe
+          fi
 
-            shopt -s nullglob
-            stones=(./*.stone)
-            if (( ${#stones[@]} == 0 )); then
-              echo "no .stone produced for ${name}" >&2
-              exit 1
-            fi
-            mv -v "${stones[@]}" "${LOCAL_REPO}/"
-            moss index -i "${LOCAL_REPO}"
-            echo "::endgroup::"
-          done
+          df -h /
+          "${BOULDER_BIN}" "${BOULDER_FLAGS[@]}" build -y -u -p ci-x86_64 "$recipe"
+          if [ -n "${cleanup}" ]; then rm -f "${cleanup}"; fi
 
-          ls -lah "${LOCAL_REPO}"
+          shopt -s nullglob
+          stones=(./*.stone)
+          if (( ${#stones[@]} == 0 )); then
+            echo "no .stone produced for ${name}" >&2
+            exit 1
+          fi
+
+          mkdir -p "${GITHUB_WORKSPACE}/out"
+          mv -v "${stones[@]}" "${GITHUB_WORKSPACE}/out/"
+
+          # Free boulder build roots before artifact upload
+          rm -rf "${HOME}/.cache/boulder" || true
+          df -h /
+
+      - name: Upload stones for ${{ matrix.recipe }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: stone-${{ matrix.recipe }}
+          path: out/*.stone
+          if-no-files-found: error
+          retention-days: 3
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Free disk space
+        uses: jlumbroso/free-disk-space@main
+        with:
+          tool-cache: false
+          large-packages: false
+          docker-images: true
+          swap-storage: false
+
+      - name: Download tooling
+        uses: actions/download-artifact@v4
+        with:
+          name: aos-tools
+          path: /tmp/aos-tools
+
+      - name: Install moss
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/aos-unpack "$HOME/.local/bin"
+          tar -C /tmp/aos-unpack -xJf /tmp/aos-tools/aos-tools.tar.xz
+          install -m755 /tmp/aos-unpack/moss "$HOME/.local/bin/"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Download all stones
+        uses: actions/download-artifact@v4
+        with:
+          pattern: stone-*
+          path: stones-raw
+          merge-multiple: true
+
+      - name: Index moss repo
+        run: |
+          set -euo pipefail
+          mkdir -p repo/x86_64
+          # Artifacts may nest per-recipe dirs depending on merge-multiple
+          find stones-raw -type f -name '*.stone' -exec mv -v {} repo/x86_64/ \;
+          moss index -i repo/x86_64
+          ls -lah repo/x86_64
 
       - name: Upload stones artifact
         uses: actions/upload-artifact@v4
@@ -168,7 +282,7 @@ jobs:
           path: repo
 
   deploy:
-    needs: build
+    needs: publish
     runs-on: ubuntu-latest
     environment:
       name: github-pages
