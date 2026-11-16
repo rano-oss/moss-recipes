@@ -1,0 +1,39 @@
+# SPDX-FileCopyrightText: 2026 rano-oss
+# SPDX-License-Identifier: MPL-2.0
+#
+# Local override of cosmic-comp with xx-input-method / multi-IME support.
+# Lives in the local moss repo (priority 100) so syncs keep this build.
+
+name        : cosmic-comp
+version     : "1.11.0"
+release     : 1066
+homepage    : https://github.com/rano-oss/cosmic-comp
+upstreams   :
+    - git|https://github.com/rano-oss/cosmic-comp.git :
+        ref: 048f98991b7557552d981c60e8faffd2f2bb60cd
+summary     : Cosmic Desktop Compositor (IME dogfood)
+description : |
+    Cosmic Desktop Compositor with experimental xx-input-method /
+    multi-IME support (branch experimental/xx-im-preedit-start).
+    Xwayland XIM bridge / X11 popup experiments are not dogfooded.
+license     : GPL-3.0
+builddeps   :
+    - binary(just)
+    - pkgconfig(gbm)
+    - pkgconfig(libdisplay-info)
+    - pkgconfig(libinput)
+    - pkgconfig(libseat)
+    - pkgconfig(libudev)
+    - pkgconfig(pixman-1)
+    - pkgconfig(xkbcommon)
+rundeps     :
+    - binary(Xwayland)
+    - iso-codes
+    - shared-mime-info
+networking  : true
+setup       : |
+    %cargo_fetch
+build       : |
+    %cargo_build
+install     : |
+    CARGO_TARGET_DIR="target/%(target_triple)" just rootdir=%(installroot) install

@@ -1,0 +1,15 @@
+# Boulder build outputs
+*.stone
+*.stone.*
+build.log
+manifest.*.bin
+manifest.*.jsonc
+
+# Local / CI publish trees
+/repo/
+/.cache/
+.env
+
+# Editor / OS
+*~
+.DS_Store

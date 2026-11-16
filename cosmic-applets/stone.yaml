@@ -1,0 +1,34 @@
+# SPDX-FileCopyrightText: 2026 rano-oss
+# SPDX-License-Identifier: MPL-2.0
+#
+# Local override of cosmic-applets with input-sources IME applet.
+
+name        : cosmic-applets
+version     : "1.11.0"
+release     : 1060
+homepage    : https://github.com/rano-oss/cosmic-applets
+upstreams   :
+    - git|https://github.com/rano-oss/cosmic-applets.git :
+        ref: 02fd3cd7af176ef3ae4c2aea6ffd33150b9aec77
+summary     : Cosmic Panel Applets (IME dogfood)
+description : |
+    Cosmic Panel Applets including cosmic-applet-input-sources
+    (branch input-method-unstable-v3).
+license     : GPL-3.0
+builddeps   :
+    - binary(just)
+    - pkgconfig(dbus-1)
+    - pkgconfig(libinput)
+    - pkgconfig(libpipewire-0.3)
+    - pkgconfig(libpulse)
+    - pkgconfig(libudev)
+    - pkgconfig(xkbcommon)
+rundeps     :
+    - bluez
+networking  : true
+setup       : |
+    %cargo_fetch
+build       : |
+    %cargo_build
+install     : |
+    CARGO_TARGET_DIR="target/%(target_triple)" just rootdir=%(installroot) install

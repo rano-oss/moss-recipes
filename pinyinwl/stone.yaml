@@ -1,0 +1,26 @@
+# SPDX-FileCopyrightText: 2026 rano-oss
+# SPDX-License-Identifier: MPL-2.0
+
+name        : pinyinwl
+version     : "0.1.0"
+release     : 1005
+homepage    : https://github.com/rano-oss/pinyinwl
+upstreams   :
+    - git|https://github.com/rano-oss/pinyinwl.git :
+        ref: 4c60a74cc2230f87d20d6a931ad1e41c8566a2cd
+summary     : Pinyin input method for Wayland / COSMIC
+description : |
+    Pinyin IME for Wayland using libchinese/libpinyin and
+    xx-input-method (branch experimental/xx-im-preedit-start).
+license     : MIT
+builddeps   :
+    - pkgconfig(xkbcommon)
+rundeps     :
+    - pinyinwl-data
+networking  : true
+setup       : |
+    %cargo_fetch
+build       : |
+    %cargo_build
+install     : |
+    %cargo_install

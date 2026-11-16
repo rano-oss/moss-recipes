@@ -1,0 +1,26 @@
+# SPDX-FileCopyrightText: 2026 rano-oss
+# SPDX-License-Identifier: MPL-2.0
+
+name        : chewingwl
+version     : "0.1.0"
+release     : 1006
+homepage    : https://github.com/rano-oss/chewingwl
+upstreams   :
+    - git|https://github.com/rano-oss/chewingwl.git :
+        ref: b48cdf2e9bd33c7e97e2a0e292c279caaf74dc1e
+summary     : Chewing / Zhuyin input method for Wayland / COSMIC
+description : |
+    Chewing IME for Wayland with xx-input-method support
+    (branch experimental/xx-im-preedit-start).
+license     : MIT
+builddeps   :
+    - pkgconfig(xkbcommon)
+rundeps     :
+    - libchewing-data
+networking  : true
+setup       : |
+    %cargo_fetch
+build       : |
+    %cargo_build
+install     : |
+    %cargo_install

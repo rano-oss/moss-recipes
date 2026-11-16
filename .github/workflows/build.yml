@@ -1,0 +1,178 @@
+name: Build IME stones
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "**/stone.yaml"
+      - "**/*.tar.xz"
+      - justfile
+      - .github/workflows/build.yml
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+  RECIPES: pinyinwl-data libchewing-data pinyinwl chewingwl cosmic-comp cosmic-applets cosmic-session
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    steps:
+      - name: Checkout recipes
+        uses: actions/checkout@v4
+
+      - name: Install host packages
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential clang pkg-config curl git \
+            libarchive-tools ca-certificates
+
+      - name: Install just
+        uses: extractions/setup-just@v2
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.94"
+
+      - name: Configure subuid/subgid
+        run: |
+          sudo touch /etc/subuid /etc/subgid
+          # Allow rootless boulder containers (idempotent-ish)
+          if ! grep -q "^${USER}:" /etc/subuid; then
+            sudo usermod --add-subuids 1065536-1131071 --add-subgids 1065536-1131071 "${USER}"
+          fi
+          if ! grep -q "^root:" /etc/subuid; then
+            sudo usermod --add-subuids 1000000-1065535 --add-subgids 1000000-1065535 root
+          fi
+          # Ubuntu 24.04+ often restricts unprivileged userns
+          if [ -f /proc/sys/kernel/apparmor_restrict_unprivileged_userns ]; then
+            echo 0 | sudo tee /proc/sys/kernel/apparmor_restrict_unprivileged_userns
+          fi
+
+      - name: Cache cargo registry / os-tools build
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            ~/os-tools/target
+          key: os-tools-${{ runner.os }}-${{ hashFiles('.github/workflows/build.yml') }}
+
+      - name: Build and install moss + boulder
+        run: |
+          set -euo pipefail
+          if [ ! -d "$HOME/os-tools/.git" ]; then
+            git clone --depth 1 https://github.com/AerynOS/os-tools.git "$HOME/os-tools"
+          else
+            git -C "$HOME/os-tools" fetch --depth 1 origin main
+            git -C "$HOME/os-tools" reset --hard origin/main
+          fi
+          cd "$HOME/os-tools"
+          just get-started
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Configure boulder profile + local repo
+        run: |
+          set -euo pipefail
+          LOCAL_REPO="${GITHUB_WORKSPACE}/repo/x86_64"
+          mkdir -p "$LOCAL_REPO" "$HOME/.config/boulder/profile.d"
+          moss index -i "$LOCAL_REPO"
+
+          cat > "$HOME/.config/boulder/profile.d/ci-x86_64.kdl" <<EOF
+          ci-x86_64 {
+            repositories {
+              local {
+                description "CI publish tree"
+                uri "file://${LOCAL_REPO}/stone.index"
+                priority 100
+                active #true
+              }
+              volatile {
+                description "aerynOS volatile stream (CDN)"
+                base-uri "https://cdn.aerynos.dev/"
+                channel "main"
+                version "stream/volatile"
+                arch "x86_64"
+                priority 0
+                active #true
+              }
+            }
+          }
+          EOF
+          # Strip leading indentation from the heredoc body
+          sed -i 's/^          //' "$HOME/.config/boulder/profile.d/ci-x86_64.kdl"
+
+          {
+            echo "BOULDER_PROFILE=ci-x86_64"
+            echo "LOCAL_REPO=${LOCAL_REPO}"
+            echo "BOULDER_ARGS=--data-dir=${HOME}/.local/share/boulder --config-dir=${HOME}/.config/boulder --moss-root=${HOME}/.cache/boulder"
+            echo "BOULDER=${HOME}/.local/bin/boulder"
+          } >> "$GITHUB_ENV"
+
+      - name: Build all recipes
+        run: |
+          set -euo pipefail
+          export PATH="${HOME}/.local/bin:${PATH}"
+          BOULDER_BIN="${HOME}/.local/bin/boulder"
+          BOULDER_FLAGS=(--data-dir="${HOME}/.local/share/boulder" --config-dir="${HOME}/.config/boulder" --moss-root="${HOME}/.cache/boulder")
+
+          for name in ${RECIPES}; do
+            echo "::group::Building ${name}"
+            dir="${GITHUB_WORKSPACE}/${name}"
+            cd "$dir"
+            recipe=stone.yaml
+            cleanup=
+            if grep -q '__RECIPE_DIR__' stone.yaml; then
+              recipe="$(mktemp ./stone.XXXXXX.yaml)"
+              sed "s|__RECIPE_DIR__|${dir}|g" stone.yaml > "$recipe"
+              cleanup=$recipe
+            fi
+            "${BOULDER_BIN}" "${BOULDER_FLAGS[@]}" build -y -u -p ci-x86_64 "$recipe"
+            if [ -n "${cleanup}" ]; then rm -f "${cleanup}"; fi
+
+            shopt -s nullglob
+            stones=(./*.stone)
+            if (( ${#stones[@]} == 0 )); then
+              echo "no .stone produced for ${name}" >&2
+              exit 1
+            fi
+            mv -v "${stones[@]}" "${LOCAL_REPO}/"
+            moss index -i "${LOCAL_REPO}"
+            echo "::endgroup::"
+          done
+
+          ls -lah "${LOCAL_REPO}"
+
+      - name: Upload stones artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ime-stones
+          path: repo/x86_64/*
+          if-no-files-found: error
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: repo
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

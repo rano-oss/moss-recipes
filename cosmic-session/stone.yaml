@@ -1,0 +1,59 @@
+# SPDX-FileCopyrightText: 2026 rano-oss
+# SPDX-License-Identifier: MPL-2.0
+#
+# Local override of cosmic-session with native IME supervisor.
+
+name        : cosmic-session
+version     : "1.11.0"
+release     : 1065
+homepage    : https://github.com/rano-oss/cosmic-session
+upstreams   :
+    - git|https://github.com/rano-oss/cosmic-session.git :
+        ref: f7f148031e1fe5746a6f3c3ca8ab89f7c0ac2e6f
+summary     : Cosmic Session Management (IME dogfood)
+description : |
+    Cosmic Session Management with native IME launch via
+    wp_security_context (branch input-method-unstable-v3).
+license     : GPL-3.0
+builddeps   :
+    - binary(just)
+    - pkgconfig(xkbcommon)
+rundeps     :
+    - binary(awk)
+    - binary(boltctl)
+    - binary(cosmic-app-library)
+    - binary(cosmic-bg)
+    - binary(cosmic-comp)
+    - binary(cosmic-files)
+    - binary(cosmic-greeter)
+    - binary(cosmic-idle)
+    - binary(cosmic-notifications)
+    - binary(cosmic-osd)
+    - binary(cosmic-osk)
+    - binary(cosmic-panel)
+    - binary(cosmic-randr)
+    - binary(cosmic-settings)
+    - binary(cosmic-settings-daemon)
+    - binary(cosmic-viewer)
+    - binary(cosmic-workspaces)
+    - binary(gnome-keyring)
+    - binary(switcherooctl)
+    - binary(update-desktop-database)
+    - binary(update-mime-database)
+    - binary(upower)
+    - binary(xdg-user-dirs-gtk-update)
+    - accountsservice
+    - font-noto
+    - font-opensans
+    - pciutils
+    - wireplumber
+    - xdg-desktop-portal-cosmic
+networking  : true
+setup       : |
+    %cargo_fetch
+build       : |
+    %cargo_build
+install     : |
+    CARGO_TARGET_DIR="target/%(target_triple)" just rootdir=%(installroot) install
+
+    %install_file data/dconf/profile/cosmic %(installroot)%(datadir)/dconf/profile/cosmic

@@ -1,0 +1,24 @@
+# SPDX-FileCopyrightText: 2026 rano-oss
+# SPDX-License-Identifier: MPL-2.0
+
+name        : pinyinwl-data
+version     : "0.1.0"
+release     : 1001
+homepage    : https://github.com/rano-oss/libchinese
+upstreams   :
+    # __RECIPE_DIR__ is rewritten to an absolute path by just/CI before boulder runs
+    - "file:///__RECIPE_DIR__/pinyinwl-data.tar.xz" : b0e79218b6046b72fcb355fa2e005d5b7c59fec2b50e1f989d2dc03dbbd1e6df
+summary     : Lexicon data for pinyinwl
+description : |
+    Prebuilt libpinyin lexicon trees installed to /usr/share/libpinyin/data.
+license     : GPL-3.0
+install     : |
+    mkdir -p %(installroot)%(datadir)/libpinyin
+    # tarball root is libpinyin-data/ (stripdirs default leaves one component)
+    if [ -d libpinyin-data ]; then
+        cp -a libpinyin-data %(installroot)%(datadir)/libpinyin/data
+    else
+        mkdir -p %(installroot)%(datadir)/libpinyin/data
+        cp -a . %(installroot)%(datadir)/libpinyin/data/
+        rm -f %(installroot)%(datadir)/libpinyin/data/stone.yaml
+    fi

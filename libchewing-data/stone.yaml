@@ -1,0 +1,22 @@
+# SPDX-FileCopyrightText: 2026 rano-oss
+# SPDX-License-Identifier: MPL-2.0
+
+name        : libchewing-data
+version     : "0.1.0"
+release     : 1001
+homepage    : https://github.com/chewing/libchewing
+upstreams   :
+    # __RECIPE_DIR__ is rewritten to an absolute path by just/CI before boulder runs
+    - "file:///__RECIPE_DIR__/libchewing-data.tar.xz" : f48a8d8a7b04954a54456980b1dd7d28943f501a616e24baf1fecf2e504a982a
+summary     : System dictionary tables for chewingwl
+description : |
+    Chewing system tables installed to /usr/share/libchewing.
+license     : LGPL-2.1
+install     : |
+    mkdir -p %(installroot)%(datadir)/libchewing
+    if [ -d libchewing-data ]; then
+        cp -a libchewing-data/. %(installroot)%(datadir)/libchewing/
+    else
+        cp -a . %(installroot)%(datadir)/libchewing/
+        rm -f %(installroot)%(datadir)/libchewing/stone.yaml
+    fi
