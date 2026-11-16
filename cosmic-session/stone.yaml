@@ -5,11 +5,11 @@
 
 name        : cosmic-session
 version     : "1.11.0"
-release     : 1065
+release     : 1066
 homepage    : https://github.com/rano-oss/cosmic-session
 upstreams   :
     - git|https://github.com/rano-oss/cosmic-session.git :
-        ref: f7f148031e1fe5746a6f3c3ca8ab89f7c0ac2e6f
+        ref: fb2ab15acfea3e5a8df1ffa9b9b77471eea087a3
 summary     : Cosmic Session Management (IME dogfood)
 description : |
     Cosmic Session Management with native IME launch via
