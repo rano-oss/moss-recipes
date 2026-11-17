@@ -3,7 +3,7 @@
 
 name        : pinyinwl
 version     : "0.1.0"
-release     : 1007
+release     : 1008
 homepage    : https://github.com/rano-oss/pinyinwl
 upstreams   :
     - git|https://github.com/rano-oss/pinyinwl.git :
@@ -26,6 +26,6 @@ build       : |
     %cargo_build
 install     : |
     %cargo_install
-    install -Dm755 %(pkgdir)/files/cosmic-ime-merge-map %(installroot)/usr/bin/cosmic-ime-merge-map
-    install -Dm644 %(pkgdir)/files/cn.ron %(installroot)%(datadir)/cosmic/com.system76.CosmicComp/v1/input_method_map.d/cn.ron
-    install -Dm644 %(pkgdir)/files/cosmic-input-method-map.yaml %(installroot)%(datadir)/moss/triggers/sys.d/cosmic-input-method-map.yaml
+    install -Dm755 %(pkgdir)/cosmic-ime-merge-map %(installroot)/usr/bin/cosmic-ime-merge-map
+    install -Dm644 %(pkgdir)/cn.ron %(installroot)%(datadir)/cosmic/com.system76.CosmicComp/v1/input_method_map.d/cn.ron
+    install -Dm644 %(pkgdir)/cosmic-input-method-map.yaml %(installroot)%(datadir)/moss/triggers/sys.d/cosmic-input-method-map.yaml

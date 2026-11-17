@@ -12,7 +12,7 @@ on:
     paths:
       - "**/stone.yaml"
       - "**/*.tar.xz"
-      - "**/files/**"
+      - "**/pkg/**"
       - justfile
       - .github/workflows/build.yml
 
