@@ -3,11 +3,11 @@
 
 name        : chewingwl
 version     : "0.1.0"
-release     : 1009
+release     : 1010
 homepage    : https://github.com/rano-oss/chewingwl
 upstreams   :
     - git|https://github.com/rano-oss/chewingwl.git :
-        ref: b48cdf2e9bd33c7e97e2a0e292c279caaf74dc1e
+        ref: 2ec8c218227566ae75bb22f30d93bd5131e609fb
 summary     : Chewing / Zhuyin input method for Wayland / COSMIC
 description : |
     Chewing IME for Wayland with xx-input-method support
